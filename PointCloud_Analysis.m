@@ -6,15 +6,15 @@
 % Reading the point cloud and storing it into a pointcloud object from a
 % .PLY file 
 
-refMold = pcread('C:\Users\Smacwan1933\Downloads\mesh2.ply');       % --- Reading Reference PointCloud PLY file 
-refCamera = pcread('C:\Users\Smacwan1933\Downloads\cleanface.ply'); % --- Reading Camera PointCloud PLY file
+refMold = pcread('.\CAD_model.ply');        % --- Reading Reference PointCloud PLY file 
+refCamera = pcread('.\Live_model.ply');     % --- Reading Camera PointCloud PLY file
 
 % Downsampling both the pointclouds using 'gridAverage' method  
 refMold_down = pcdownsample(refMold,'gridAverage',15);
-cloudout3= pcdownsample(refCamera,'gridAverage',0.010);
+refCam_down= pcdownsample(refCamera,'gridAverage',0.010);
 
 % Denoising a pointcloud generated from a RealSense Camera
-refCam_denoise = pcdenoise(cloudout3,'NumNeighbors',8,...
+refCam_denoise = pcdenoise(refCam_down,'NumNeighbors',8,...
     'Threshold',0.1);
 
 % For a quality registration, scaling the pointcloud (RealSense Camera)

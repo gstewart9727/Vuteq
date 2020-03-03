@@ -4,6 +4,7 @@ import copy
 import time
 from scipy.spatial import distance
 import scipy
+import scipy.io
 
 #scipy.spatial.distance.directed_hausdorff
 
@@ -36,10 +37,10 @@ def preprocess_point_cloud(pcd, voxel_size):
 
 def prepare_dataset(voxel_size):
     print(":: Load two point clouds and disturb initial pose.")
-    source = o3d.io.read_point_cloud("Mesh2.ply")
-    target = o3d.io.read_point_cloud("cleanface.ply")
-    source.scale(0.005)
-    target.scale(10.0)
+    source = o3d.io.read_point_cloud("..\Training Mold\CamData.ply")
+    target = o3d.io.read_point_cloud("..\Training Mold\Main - Cloud.ply")
+    source.scale(1000)
+    target.scale(1)
     trans_init = np.asarray([[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0],
                              [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
     source.transform(trans_init)
@@ -91,7 +92,7 @@ def execute_fast_global_registration(source_down, target_down, source_fpfh,
 
 if __name__ == "__main__":
 
-    voxel_size = 0.05  # means 5cm for the dataset
+    voxel_size = 4  # means 5cm for the dataset
     source, target, source_down, target_down, source_fpfh, target_fpfh = \
             prepare_dataset(voxel_size)
 
@@ -99,6 +100,12 @@ if __name__ == "__main__":
     result_ransac = execute_global_registration(source_down, target_down,
                                                 source_fpfh, target_fpfh,
                                                 voxel_size)
+
+
+    print(type(result_ransac.transformation))
+    print(result_ransac.transformation)
+    scipy.io.savemat('out.mat', mdict={'out': result_ransac.transformation}, oned_as='row')
+
     time_match = time.time() - start
     print("Global registration took %.3f sec.\n" % (time_match))
     print(result_ransac)
@@ -133,7 +140,7 @@ if __name__ == "__main__":
     trans_source.paint_uniform_color([1, 0.706, 0])
     target_down.paint_uniform_color([0, 0.651, 0.929])
 
-    a = np.logical_and(distances > 0.08, distances < 0.3)
+    a = np.logical_and(distances > 0.2, distances < 0.3)
 
     color_array = np.asarray(target_down.colors)
 

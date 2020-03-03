@@ -51,8 +51,14 @@ subplot(2,2,3);
 pcshowpair(camCloud_scaled,moldCloud_down, 'MarkerSize', 20);
 
 % Use of ICP Pointcloud Registration Algorithm which uses Local Registration scheme  
-%tform = pcregistericp(camCloud_down, moldCloud_down,'Metric','pointToPoint');
-tform = pcregistercpd(camCloud_scaled, moldCloud_down, 'Transform', 'Rigid', 'Tolerance', 1000);
+tform = pcregistericp(camCloud_down, moldCloud_down);
+%tform = pcregistercpd(camCloud_scaled, moldCloud_down, 'Transform', 'Rigid', 'Tolerance', 1000);
+tform_data = load('.\Open3D\out.mat');
+tform_data_rot = flip(rot90(tform_data.out));
+
+tform.T = tform_data_rot
+%tform = affine3d(tform_data);
+%save('tform.mat', 'tform');
 %tform = pcregisterndt(camCloud_scaled, moldCloud_down, 10);
 
 % Transforming Camera pointcloud with the new transformed Co-ordinates from

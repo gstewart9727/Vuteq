@@ -5,6 +5,7 @@ import time
 from scipy.spatial import distance
 import scipy
 import scipy.io
+import ctypes   
 
 #scipy.spatial.distance.directed_hausdorff
 
@@ -12,8 +13,8 @@ import scipy.io
 def draw_registration_result(source, target, transformation):
     source_temp = copy.deepcopy(source)
     target_temp = copy.deepcopy(target)
-    source_temp.paint_uniform_color([1, 0.706, 0])
-    target_temp.paint_uniform_color([0, 0.651, 0.929])
+    # source_temp.paint_uniform_color([1, 0.706, 0])
+    # target_temp.paint_uniform_color([0, 0.651, 0.929])
     source_temp.transform(transformation)
     o3d.visualization.draw_geometries([source_temp, target_temp])
 
@@ -32,18 +33,17 @@ def preprocess_point_cloud(pcd, voxel_size):
     pcd_fpfh = o3d.registration.compute_fpfh_feature(
         pcd_down,
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+
     return pcd_down, pcd_fpfh
 
 
 def prepare_dataset(voxel_size):
-    print(":: Load two point clouds and disturb initial pose.")
+    print(":: Load two point clouds")
     source = o3d.io.read_point_cloud("..\Training Mold\CamData.ply")
     target = o3d.io.read_point_cloud("..\Training Mold\Main - Cloud.ply")
     source.scale(1000)
     target.scale(1)
-    trans_init = np.asarray([[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                             [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
-    source.transform(trans_init)
+
     draw_registration_result(source, target, np.identity(4))
 
     source_down, source_fpfh = preprocess_point_cloud(source, voxel_size)
@@ -77,77 +77,64 @@ def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size):
         o3d.registration.TransformationEstimationPointToPlane())
     return result
 
-
-def execute_fast_global_registration(source_down, target_down, source_fpfh,
-                                     target_fpfh, voxel_size):
-    distance_threshold = voxel_size * 0.1
-    print(":: Apply fast global registration with distance threshold %.3f" \
-            % distance_threshold)
-    result = o3d.registration.registration_fast_based_on_feature_matching(
-        source_down, target_down, source_fpfh, target_fpfh,
-        o3d.registration.FastGlobalRegistrationOption(
-            maximum_correspondence_distance=distance_threshold))
-    return result
+def Mbox(title, text, style):
+    return ctypes.windll.user32.MessageBoxW(0, text, title, style)
 
 
 if __name__ == "__main__":
 
-    voxel_size = 4  # means 5cm for the dataset
+    # Start timer
+    start = time.time()
+
+    voxel_size = 4 
     source, target, source_down, target_down, source_fpfh, target_fpfh = \
             prepare_dataset(voxel_size)
 
-    start = time.time()
+    # Perform global registration
     result_ransac = execute_global_registration(source_down, target_down,
                                                 source_fpfh, target_fpfh,
                                                 voxel_size)
 
-
-    print(type(result_ransac.transformation))
-    print(result_ransac.transformation)
-    scipy.io.savemat('out.mat', mdict={'out': result_ransac.transformation}, oned_as='row')
-
-    time_match = time.time() - start
-    print("Global registration took %.3f sec.\n" % (time_match))
+    # Display global registration results
     print(result_ransac)
-    draw_registration_result(source_down, target_down,
-                             result_ransac.transformation)
+    # draw_registration_result(source_down, target_down, result_ransac.transformation)
 
-    # start = time.time()
-    # result_fast = execute_fast_global_registration(source_down, target_down,
-    #                                                source_fpfh, target_fpfh,
-    #                                                voxel_size)
-    # print("Fast global registration took %.3f sec.\n" % (time.time() - start))
-    # print(result_fast)
-    # draw_registration_result(source_down, target_down,
-    #                          result_fast.transformation)
+    # Perform icp registration
+    result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh,
+                                     voxel_size)
+    # Display icp registration results
+    print(result_icp)
+    # draw_registration_result(source_down, target_down, result_icp.transformation)
 
-    start = time.time()
-    trans_source = copy.deepcopy(source_down)
-    trans_source.transform(result_ransac.transformation)
+    # Record time for registration process
+    time_finish = time.time() - start
+    print("Total time is %.3f sec.\n" % time_finish)
+    
+    # Perform transformation on camera point cloud data
+    source_down.transform(result_icp.transformation)
 
+    # Calculated ueclidian distance between point pairs for use in deviation analysis
+    distances = distance.cdist(np.asarray(source_down.points), np.asarray(target_down.points), 'euclidean')
+    distances = np.min(np.array(distances), axis=1)
+    print ('Source Data Points \n')
+    print(np.asarray(source_down.points))
+    print ('Target Data Points \n')
+    print(np.asarray(target_down.points))
+    print ('Distances \n')
+    print(distances)
 
-    distances = distance.cdist(np.asarray(trans_source.points), np.asarray(target_down.points), 'euclidean')
-
-    print(distances.shape)
-
-    distances = np.min(np.array(distances), axis=0)
-
-    time_dist = time.time() - start
-
-
-    print("Distance calculations took %.3f sec.\n" % (time_dist))
-
-    trans_source.paint_uniform_color([1, 0.706, 0])
+    # Highlight points that deviate beyond a set threshold and display them
+    source_down.paint_uniform_color([1, 0.706, 0])
     target_down.paint_uniform_color([0, 0.651, 0.929])
-
-    a = np.logical_and(distances > 0.2, distances < 0.3)
-
-    color_array = np.asarray(target_down.colors)
-
+    a = np.logical_and(distances > 3.5, distances < 50)
+    color_array = np.asarray(source_down.colors)
     color_array[a, :] = [1, 0, 0]
+    source_down.colors = o3d.utility.Vector3dVector(color_array)
+    o3d.visualization.draw_geometries([source_down, target_down])
 
-    target_down.colors = o3d.utility.Vector3dVector(color_array)
-
-    o3d.visualization.draw_geometries([trans_source, target_down])
-
-    print("Total time is %.3f sec.\n" % (time_dist + time_match))
+    # Display number of points beyond deviation threshold and sound warning if required
+    occurrences = np.count_nonzero(a == True)
+    if occurrences > 10: # Allow for some false positives
+        warning_data = "{} Deviation points detected. Check mold surface.".format(occurrences)
+        ctypes.windll.user32.MessageBoxW(0, warning_data, "Warning", 1)
+    print (type(a))

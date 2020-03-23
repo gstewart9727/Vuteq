@@ -15,6 +15,7 @@ from scipy.spatial import distance
 import scipy
 import scipy.io
 import ctypes   
+import Surface_Analysis as sa
 
 # Global variable determining level of output of application
 verbose = False
@@ -49,7 +50,7 @@ def visuals(clouds):
 
     # Create an instance of the visualizer window
     vis = o3d.visualization.Visualizer()
-    vis.create_window(width=1410, left=0, top=0)
+    vis.create_window(width=1395, height=670, left=10, top=100)
 
     # Iterate through list of points clouds and add them to visualizer
     for geometry in clouds:
@@ -67,16 +68,16 @@ def visuals(clouds):
 # Description   : This function uniformly reduces the number of points in a cloud to
 #                 increase the effeciency of further registration operations
 def preprocess_point_cloud(pcd, voxel_size):
-    print(":: Downsample with a voxel size %.3f." % voxel_size)
+    # print(":: Downsample with a voxel size %.3f." % voxel_size)
     pcd_down = pcd.voxel_down_sample(voxel_size)
 
     radius_normal = voxel_size * 2
-    print(":: Estimate normal with search radius %.3f." % radius_normal)
+    # print(":: Estimate normal with search radius %.3f." % radius_normal)
     pcd_down.estimate_normals(
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
 
     radius_feature = voxel_size * 5
-    print(":: Compute FPFH feature with search radius %.3f." % radius_feature)
+    # print(":: Compute FPFH feature with search radius %.3f." % radius_feature)
     pcd_fpfh = o3d.registration.compute_fpfh_feature(
         pcd_down,
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
@@ -90,22 +91,20 @@ def preprocess_point_cloud(pcd, voxel_size):
 # Returns       : Processed point clouds
 # Description   : This function uniformly reduces the number of points in a cloud to
 #                 increase the efficiency of further registration operations
-def prepare_dataset(voxel_size):
-    print(":: Load two point clouds")
-    target = o3d.io.read_point_cloud("..\Training Mold\Main-Refined.ply")
-    # source = o3d.io.read_point_cloud("..\Training Mold\CamData.ply")
-    # target = o3d.io.read_point_cloud("..\Training Mold\Main - Cloud.ply")
+def prepare_dataset(voxel_size, targetFile, cropFile):
+    # print(":: Load two point clouds")
+    target = o3d.io.read_point_cloud(targetFile)
     source = o3d.io.read_point_cloud("..\Training Mold\Training_mold.ply")
+    cropROI = o3d.io.read_point_cloud(cropFile)
     source.scale(1000)
     target.scale(1)
 
     # Prepare bounding box for cropping
-    bounding_points = o3d.io.read_point_cloud("..\Training Mold\cropped_1.ply")
-    bbox = o3d.geometry.OrientedBoundingBox(o3d.geometry.OrientedBoundingBox.create_from_points(bounding_points.points))
+    bbox = o3d.geometry.OrientedBoundingBox(o3d.geometry.OrientedBoundingBox.create_from_points(cropROI.points))
     
-    # IF set to verbose mode, display unregistered point clouds
-    if (verbose == True):
-        print(np.asarray(o3d.geometry.OrientedBoundingBox.get_box_points(bbox)))
+    # If set to verbose mode, display unregistered point clouds
+    if (verbose):
+        # print(np.asarray(o3d.geometry.OrientedBoundingBox.get_box_points(bbox)))
         geometries = ([bbox, source])
         visuals(geometries)
 
@@ -128,9 +127,9 @@ def execute_global_registration(source_down, target_down, source_fpfh,
                                 target_fpfh, voxel_size):
 
     distance_threshold = voxel_size * 1.5
-    print(":: RANSAC registration on downsampled point clouds.")
-    print("   Since the downsampling voxel size is %.3f," % voxel_size)
-    print("   we use a liberal distance threshold %.3f." % distance_threshold)
+    # print(":: RANSAC registration on downsampled point clouds.")
+    # print("   Since the downsampling voxel size is %.3f," % voxel_size)
+    # print("   we use a liberal distance threshold %.3f." % distance_threshold)
     result = o3d.registration.registration_ransac_based_on_feature_matching(
         source_down, target_down, source_fpfh, target_fpfh, distance_threshold,
         o3d.registration.TransformationEstimationPointToPoint(False), 4, [
@@ -149,20 +148,13 @@ def execute_global_registration(source_down, target_down, source_fpfh,
 #                 The result will be two point clouds that are aligned closely enough to perform deviation analysis.
 def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, result_ransac):
     distance_threshold = voxel_size * 0.4
-    print(":: Point-to-plane ICP registration is applied on original point")
-    print("   clouds to refine the alignment. This time we use a strict")
-    print("   distance threshold %.3f." % distance_threshold)
+    # print(":: Point-to-plane ICP registration is applied on original point")
+    # print("   clouds to refine the alignment. This time we use a strict")
+    # print("   distance threshold %.3f." % distance_threshold)
     result = o3d.registration.registration_icp(
         source, target, distance_threshold, result_ransac.transformation,
         o3d.registration.TransformationEstimationPointToPlane())
     return result
-
-def display(occurrences):
-    warning_data = "{} Deviation points detected. Check mold surface.".format(occurrences)
-    ctypes.windll.user32.MessageBoxW(0, warning_data, "Warning", 1)
-
-def Mbox(title, text, style):
-    return ctypes.windll.user32.MessageBoxW(0, text, title, style)
 
 
 # Function      : run
@@ -172,7 +164,7 @@ def Mbox(title, text, style):
 #                 verbosity - A boolean value used to determine the level of output from the registration process.
 # Returns       : None
 # Description   : This function calls the functions and performs calculations required for the full registration process.
-def run(self, devThreshVal, devTolVal, verbosity):
+def run(input, output, devThreshVal, devTolVal, verbosity, targetFile, cropFile):
 
     # Set verbosity level
     global verbose
@@ -184,7 +176,18 @@ def run(self, devThreshVal, devTolVal, verbosity):
     # Prepare datasets
     voxel_size = 4
     source, target, source_down, target_down, source_fpfh, target_fpfh = \
-            prepare_dataset(voxel_size)
+            prepare_dataset(voxel_size, targetFile, cropFile)
+    output.put('stage|Cropping')
+
+    # Send information about pointclouds
+    if (verbose):
+        print ('Source Data Points \n')
+        output.put('sourcePoints|Points: {}'.format(len(source.points)))
+        output.put('sourcePointsDS|DS Points: {}'.format(len(source_down.points)))
+        print ('Target Data Points \n')
+        output.put('targetPoints|Points: {}'.format(len(target.points)))
+        output.put('targetPointsDS|DS Points: {}'.format(len(target_down.points)))
+
 
     # Perform global registration
     result_ransac = execute_global_registration(source_down, target_down,
@@ -192,21 +195,20 @@ def run(self, devThreshVal, devTolVal, verbosity):
                                                 voxel_size)
 
     # Display global registration results
-    if (verbose == True):
+    output.put('stage|Global Registration')
+    if (verbose):
         print(result_ransac)
         draw_registration_result(source_down, target_down, result_ransac.transformation)
 
     # Perform icp registration
     result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh,
                                     voxel_size, result_ransac)
+
     # Display icp registration results
-    if (verbose == True):
+    output.put('stage|ICP Registration')
+    if (verbose):
         print(result_icp)
         draw_registration_result(source_down, target_down, result_icp.transformation)
-
-    # Record time for registration process
-    time_finish = time.time() - start
-    print("Total time is %.3f sec.\n" % time_finish)
     
     # Perform transformation on camera point cloud data
     source_down.transform(result_icp.transformation)
@@ -214,12 +216,6 @@ def run(self, devThreshVal, devTolVal, verbosity):
     # Calculated ueclidian distance between point pairs for use in deviation analysis
     distances = distance.cdist(np.asarray(source_down.points), np.asarray(target_down.points), 'euclidean')
     distances = np.min(np.array(distances), axis=1)
-    print ('Source Data Points \n')
-    print(np.asarray(source_down.points))
-    print ('Target Data Points \n')
-    print(np.asarray(target_down.points))
-    print ('Distances \n')
-    print(distances)
 
     # Count number of points deviating beyond threshold
     source_down.paint_uniform_color([1, 0.706, 0])
@@ -229,12 +225,19 @@ def run(self, devThreshVal, devTolVal, verbosity):
 
     # Display number of points beyond deviation threshold and sound warning if required
     if occurrences > float(devTolVal): # Allow for some false positives
-        display(occurrences)
+        output.put('result|Deviated Points: {}'.format(occurrences))
 
     # Show highlighted deviation points
+    output.put('stage|Deviation Display')
     color_array = np.asarray(source_down.colors)
     color_array[a, :] = [1, 0, 0]
     source_down.colors = o3d.utility.Vector3dVector(color_array)
-    if (verbose == True):
+    if (verbose):
         geometries = ([source_down, target_down])
         visuals(geometries)
+
+    # Record time for registration process
+    time_finish = time.time() - start
+    print("Total time is %.3f sec.\n" % time_finish)
+    output.put('time|Time elapsed: %f' % time_finish)
+    output.put('finish|')

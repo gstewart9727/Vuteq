@@ -1,8 +1,9 @@
 # Filename      : Surface_Analysis.py
-# Version       : 0.0.0
-# Version Date  :
+# Version       : 0.1
+# Version Date  : 2020-03-26
 # Programmer    : Gabriel Stewart
-# Description   : 
+# Description   : This file contains the source code for the GUI class. The methods for creating and updating the GUI
+#                 as well as interacting with child threads is contained here.
 
 
 # Import libraries
@@ -20,50 +21,66 @@ import win32gui
 import time
 from PIL import ImageTk, Image
 
-
-
-class Application(tk.Frame):
+# Class         : GUI
+# Description   : This class handles the creation and maintenance of the GUI. As well as starting/handling child threads
+class GUI(object):
 
     # Function      : __init__
     # Parameters    : 
     # Returns       : None
     # Description   : Initializer function. Calls functions to generate required GUI elements
-    def __init__(self, master=None):
-        super().__init__(master)
-        self.master = master
-        self.grid()
+    def __init__(self):
+        # Create instance of Tkinter window
+        root = self.root = tk.Tk()
+
+        # Establish grid as the layout system for the window
+        root.grid()
         self.create_window()
         self.create_widgets()
 
         # Create queues
         self.task_queue = Queue()
         self.done_queue = Queue()
+
+        # Start registration process in its own thread, it will perform downsampling then wait for instructions
+        self.p = Process(target=rg.run, args=(self.task_queue, self.done_queue, self.CADfile.get(), self.cropFile.get())) 
+        self.p.start() 
+
+        # Create handler for window closing
+        root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Start handler for GUI updates
         self.responseHandler()
+        
 
     # Function      : create_window
     # Parameters    : 
     # Returns       : None
-    # Description   : Initializer function. Calls functions to generate required GUI elements
+    # Description   : This function creates visual aspects of the GUI application
     def create_window(self):
         # Define sizes for gui window
         w = 350
         h = 1080
 
         # Get screen sizes
-        ws = root.winfo_screenwidth() + 3
-        hs = root.winfo_screenheight() - 70
+        ws = self.root.winfo_screenwidth() + 3
+        hs = self.root.winfo_screenheight() - 70
 
         # calculate x and y coordinates for the Tk root window
         x = -10
         y = 0
 
-        self.visualFrame = tk.Frame(root, width=938, height=500, relief=tk.RAISED, borderwidth=1)
-        self.optionsFrame = tk.Frame(root, relief=tk.RAISED, borderwidth=1)
-        self.outputFrame = tk.Frame(root, height=125, relief=tk.RAISED, borderwidth=1)
+        # Create and configure frames which will contain widgets for different purposes
+        self.visualFrame = tk.Frame(self.root, width=938, height=500, relief=tk.RAISED, borderwidth=1)
+        self.optionsFrame = tk.Frame(self.root, relief=tk.RAISED, borderwidth=1)
+        self.outputFrame = tk.Frame(self.root, height=125, relief=tk.RAISED, borderwidth=1)
         self.visualFrame.grid(row=0, column=0, sticky="nes", pady=5, padx=5)
-        self.optionsFrame.grid(row=0, column=1, sticky="nws", pady=5, padx=5)
-        self.outputFrame.grid(row=1, columnspan=2, sticky="ew", padx=5, pady=5)
+        self.optionsFrame.grid(row=0, column=1, rowspan=2, sticky="nws", pady=5, padx=5)
+        self.outputFrame.grid(row=1, sticky="ew", padx=5, pady=5)
+        # Change weight and propogation settings to allow manual resizing of columns
         self.outputFrame.grid_propagate(False)
+        self.outputFrame.grid_columnconfigure(0, weight=1)
+        self.optionsFrame.grid_rowconfigure(20, weight=1)
 
         # Create Labels for Settings Section
         self.statusLabel = tk.Label(self.optionsFrame, text='Operation Info')
@@ -117,7 +134,7 @@ class Application(tk.Frame):
         tkimage = ImageTk.PhotoImage(resized)
         logoLabel = tk.Label(self.optionsFrame, image=tkimage)
         logoLabel.image = tkimage
-        logoLabel.grid(row=20,columnspan=5)   
+        logoLabel.grid(row=20, columnspan=5, rowspan=5)   
 
         # Create font
         f = font.Font(self.statusLabel, self.statusLabel.cget("font"))
@@ -128,17 +145,25 @@ class Application(tk.Frame):
         self.modeLabel.configure(font=f)
 
         # Create window and title
-        root.title("Surface Analysis")
-        root.geometry('%dx%d+%d+%d' % (ws, hs, x, y))
-        root.resizable(0, 0) 
+        self.root.title("Surface Analysis")
+        self.root.geometry('%dx%d+%d+%d' % (ws, hs, x, y))
+        self.root.resizable(0, 0) 
 
+    # Function      : create_widgets
+    # Parameters    : 
+    # Returns       : None
+    # Description   : This function creates interactive aspects of the GUI application
     def create_widgets(self):
 
-        # Create file entries
-        self.cropFile = tk.Entry(self.optionsFrame)
+        # Create crop file and CAD file entry boxes
+        sv1 = tk.StringVar()
+        sv2 = tk.StringVar()
+        sv1.trace("w", lambda name, index, mode, sv1=sv1: self.resetRegister())
+        sv2.trace("w", lambda name, index, mode, sv2=sv2: self.resetRegister())
+        self.cropFile = tk.Entry(self.optionsFrame, textvariable=sv1)
         self.cropFile.insert(0, '..\Training Mold\cropped_1.ply')
         self.cropFile.grid(row=17, column=2)
-        self.CADfile = tk.Entry(self.optionsFrame)
+        self.CADfile = tk.Entry(self.optionsFrame, textvariable=sv2)
         self.CADfile.insert(0, '..\Training Mold\Main-Refined.ply')
         self.CADfile.grid(row=18, column=2)
 
@@ -154,7 +179,7 @@ class Application(tk.Frame):
         targetButton = tk.Button(self.optionsFrame, text="Browse", width=10, command=lambda : self.selectFile(self.CADfile))
         targetButton.grid(row=18, column=3, pady=5)
 
-        # Create Deviation Entries
+        # Create deviation entry boxes
         self.devThresh = tk.Entry(self.optionsFrame)
         self.devThresh.grid(row=13, column=2)
         self.devThresh.insert(10, 3.5)
@@ -165,47 +190,66 @@ class Application(tk.Frame):
         # Create output text box
         self.outputText = tk.Text(self.outputFrame)
         self.outputText.grid(row=0, columnspan=2, sticky="nsew")
-        # self.outputText.configure(state="disabled")
 
+    # Function      : setQuickMode
+    # Parameters    : 
+    # Returns       : None
+    # Description   : This function updates GUI elements pertaining to the stage and then passes
+    #                 the task specifications on the message queue to the registration process
     def setQuickMode(self):
-        print("Enabled quick analysis")
+        self.outputText.delete('1.0', tk.END)
+        self.stageValue['text'] = 'Running...'
+        self.start = time.time()
+        task = str(self.devThresh.get()) + '|' +  str(self.devTol.get()) + '|' + 'quick' + '|'
+        self.task_queue.put(task)
 
-        # Start process to perform registration and return results
-        p = Process(target=rg.run, args=(self.task_queue, self.done_queue, self.devThresh.get(), self.devTol.get(), False, self.CADfile.get(), self.cropFile.get())) 
-        p.start() 
-
+    # Function      : setVerboseMode
+    # Parameters    : 
+    # Returns       : None
+    # Description   : This function updates GUI elements pertaining to the stage and then passes
+    #                 the task specifications on the message queue to the registration process
     def setVerboseMode(self):
-        print("Enabled verbose analysis")
-        self.devThreshVal = self.devThresh.get()
-        self.devTolVal = self.devTol.get()
+        self.outputText.delete('1.0', tk.END)
+        self.stageValue['text'] = 'Running...'
+        self.start = time.time()
+        task = str(self.devThresh.get()) + '|' +  str(self.devTol.get()) + '|' + 'verbose' + '|'
+        self.task_queue.put(task)
 
-        # Start process to perform registration and return results
-        p = Process(target=rg.run, args=(self.task_queue, self.done_queue, self.devThresh.get(), self.devTol.get(), True, self.CADfile.get(), self.cropFile.get())) 
-        p.start() 
-
-    def selectFile(self, entryBox):
-
+    # Function      : selectFile
+    # Parameters    : entryBox - Reference to the entry box being updated in current context
+    # Returns       : None
+    # Description   : This function allows the user to select a file for various purposes
+    def selectFile(self, entryBox): 
         # Open select file dialog
-        self.filename =  filedialog.askopenfilename(initialdir = "./",title = "Select ply file",filetypes = (("ply files","*.ply"),("all files","*.*")))
-        entryBox.insert(0, self.filename)
+        filename =  filedialog.askopenfilename(initialdir = "./",title = "Select ply file",filetypes = (("ply files","*.ply"),("all files","*.*")))
+        self.path = filename.replace('/', '\\')
+        entryBox.delete(0, 'end')
+        entryBox.insert(0, self.path)
 
-
+    # Function      : train
+    # Parameters    : 
+    # Returns       : None
+    # Description   : Start Open3D provided applciation for gathering ROI file
     def train(self):
         p = Process(target=iv.crop_geometry, args=())   
         p.start()
 
+    # Function      : responseHandler
+    # Parameters    : 
+    # Returns       : None
+    # Description   : This function processes responses from registration thread and updates GUI elements
     def responseHandler(self):
-
+        # Wait for message in queue
         if (self.done_queue.empty() == False):
+            # Receive and display message received
             response = self.done_queue.get()
             print (response)
 
+            # Break message down my pipe delimiter
             fields = response.split('|')
             if (fields[0] == 'stage'):
                 self.stageValue['text'] = fields[1]
             elif (fields[0] == 'time'):
-                self.outputText.insert(tk.END, fields[1] + "\n")
-            elif (fields[0] == 'result'):
                 self.outputText.insert(tk.END, fields[1] + "\n")
             elif (fields[0] == 'sourcePoints'):
                 self.sourcePoints['text'] = fields[1]
@@ -215,14 +259,54 @@ class Application(tk.Frame):
                 self.sourceDownPoints['text'] = fields[1]
             elif (fields[0] == 'targetPointsDS'):
                 self.targetDownPoints['text'] = fields[1]
-            elif (fields[0] == 'finish'):
-                self.stageValue['text'] = 'Idle'    
+            elif (fields[0] == 'result'):
+                # If message contains results of registration, display results and warning if required
+                colortag = "color-" + "Red"
+                self.outputText.tag_configure(colortag, foreground="Red")
+                self.outputText.insert(tk.END, 'Deviated Points: ' + fields[2] + "\n", colortag)
+                self.stageValue['text'] = 'Idle'  
+                self.time_finish = time.time() - self.start
+                self.outputText.insert(tk.END, 'Elapsed Time: ' + str(self.time_finish) + '\n')
+                if int(fields[2]) > int(self.devTol.get()):
+                    ctypes.windll.user32.MessageBoxW(0, "Check mold surface! Obstruction Detected.", "WARNING", 0x1000)
 
-        self.after(25, self.responseHandler)        
-        
+        # Recursive function calls itself after 10ms
+        self.root.after(10, self.responseHandler)   
+
+    # Function      : resetRegister
+    # Parameters    : 
+    # Returns       : None
+    # Description   : This function attempts to close the queues and threads before restarting them
+    #                 with updated parameters
+    def resetRegister(self):
+        try:
+            self.task_queue.close()
+            self.done_queue.close()
+            if self.p.is_alive():
+                self.p.terminate()  
             
+            self.task_queue = Queue()
+            self.done_queue = Queue()
+            self.p = Process(target=rg.run, args=(self.task_queue, self.done_queue, self.CADfile.get(), self.cropFile.get())) 
+            self.p.start()
+        except AttributeError:
+            self.task_queue = None
+            self.done_queue = None
+
+    # Function      : on_closing
+    # Parameters    : 
+    # Returns       : None
+    # Description   : This function handles the window close event and shuts down application resources
+    def on_closing(self):
+        print('CLOSING')
+        self.root.destroy()
+
+        self.task_queue.close()
+        self.done_queue.close()
+        if self.p.is_alive():
+            self.p.terminate()  
+
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = Application(master=root)
-    app.mainloop()
+    gui = GUI()
+    gui.root.mainloop()

@@ -1,6 +1,6 @@
 # Filename      : register.py
-# Version       : 0.0.0
-# Version Date  :
+# Version       : 0.1
+# Version Date  : 2020-03-26
 # Programmer    : Gabriel Stewart
 # Description   : This file contains the source code for the Open3D registration process. The functions
 #                 for loading point clouds, downsampling, global registraion, icp registration, and 
@@ -15,11 +15,14 @@ from scipy.spatial import distance
 import scipy
 import scipy.io
 import ctypes   
+import win32gui
+import win32con
+import os
 import Surface_Analysis as sa
+import keyboard
 
 # Global variable determining level of output of application
 verbose = False
-
 
 # Function      : draw_registration_Result
 # Parameters    : source/target - point cloud datasets
@@ -27,14 +30,9 @@ verbose = False
 # Returns       : None
 # Description   : This function creates a visualization window for the passed source clouds
 def draw_registration_result(source, target, transformation):
-
     # Create copy of point clouds to be displayed to preserve originals
     source_temp = copy.deepcopy(source)
     target_temp = copy.deepcopy(target)
-
-    # (Optional) Paint clouds referenced color
-    # source_temp.paint_uniform_color([1, 0.706, 0])
-    # target_temp.paint_uniform_color([0, 0.651, 0.929])
 
     # Apply transformation to temporary source point cloud and display
     source_temp.transform(transformation)
@@ -47,7 +45,6 @@ def draw_registration_result(source, target, transformation):
 # Returns       : None
 # Description   : This function creates a visualization window for the passed source clouds
 def visuals(clouds):
-
     # Create an instance of the visualizer window
     vis = o3d.visualization.Visualizer()
     vis.create_window(width=1395, height=670, left=10, top=100)
@@ -57,8 +54,33 @@ def visuals(clouds):
         vis.add_geometry(geometry)
 
     # Display visualizer window and destroy it when user closes it
-    vis.run()
+    vis.update_geometry(geometry)
+    vis.poll_events()
+    vis.update_renderer()
+    
+    # Enumaerate all open windows
+    results = []
+    top_windows = []
+    win32gui.EnumWindows(windowEnumerationHandler, top_windows)
+    for i in top_windows:
+        # Find Open3D visualizer window and bring it up front
+        if "Open3D" in i[1]:
+            print (i[1]) 
+            try:
+                win32gui.ShowWindow(i[0],5)
+                win32gui.SetForegroundWindow(i[0])
+            except:
+                print ('Window open')
+            break
+
+    # Wait for keypress to continue
+    keyboard.read_key()
+
+    # Destroy visualizer window when done
     vis.destroy_window()
+
+def windowEnumerationHandler(hwnd, top_windows):
+    top_windows.append((hwnd, win32gui.GetWindowText(hwnd)))
 
 
 # Function      : preprocess_point_cloud
@@ -164,80 +186,124 @@ def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, re
 #                 verbosity - A boolean value used to determine the level of output from the registration process.
 # Returns       : None
 # Description   : This function calls the functions and performs calculations required for the full registration process.
-def run(input, output, devThreshVal, devTolVal, verbosity, targetFile, cropFile):
+def run(task_queue, done_queue, targetFile, cropFile):
 
-    # Set verbosity level
-    global verbose
-    verbose = verbosity
-
-    # Start timer
-    start = time.time()
-
+    print('STARTED')
     # Prepare datasets
     voxel_size = 4
     source, target, source_down, target_down, source_fpfh, target_fpfh = \
             prepare_dataset(voxel_size, targetFile, cropFile)
-    output.put('stage|Cropping')
+    # Create copies for restoring 
+    sourceOrig = source
+    targetOrig = target
+    sourceOrig_down = source_down
+    targetOrig_down = target_down
+    sourceOrig_fpfh = source_fpfh
+    targetOrig_fpfh = target_fpfh
+    sourceOrig.colors = source.colors
+    targetOrig.colors = target.colors
 
-    # Send information about pointclouds
-    if (verbose):
-        print ('Source Data Points \n')
-        output.put('sourcePoints|Points: {}'.format(len(source.points)))
-        output.put('sourcePointsDS|DS Points: {}'.format(len(source_down.points)))
-        print ('Target Data Points \n')
-        output.put('targetPoints|Points: {}'.format(len(target.points)))
-        output.put('targetPointsDS|DS Points: {}'.format(len(target_down.points)))
+    # Start loop to wait for task requests from parent
+    while True:
 
+        # Receive message from parent over queue
+        message = task_queue.get()
+        fields = message.split('|')
 
-    # Perform global registration
-    result_ransac = execute_global_registration(source_down, target_down,
-                                                source_fpfh, target_fpfh,
-                                                voxel_size)
+        # Exit loop if quit has been specified
+        if (fields[0] == 'quit'):
+            break
 
-    # Display global registration results
-    output.put('stage|Global Registration')
-    if (verbose):
-        print(result_ransac)
-        draw_registration_result(source_down, target_down, result_ransac.transformation)
+        # Gather variables from message
+        devThreshVal = fields[0]
+        devTolVal = fields[1]
+        if (fields[2] == 'verbose'):
+            verbose = True
+        elif (fields[2] == 'quick'):
+            verbose = False
+        
+        # Start timer
+        start = time.time()
+        total = start
 
-    # Perform icp registration
-    result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh,
-                                    voxel_size, result_ransac)
+        # Send information about pointclouds
+        if (verbose):
+            # print ('Source Data Points \n')
+            done_queue.put('sourcePoints|Points: {}'.format(len(source.points)))
+            done_queue.put('sourcePointsDS|DS Points: {}'.format(len(source_down.points)))
+            # print ('Target Data Points \n')
+            done_queue.put('targetPoints|Points: {}'.format(len(target.points)))
+            done_queue.put('targetPointsDS|DS Points: {}'.format(len(target_down.points)))
 
-    # Display icp registration results
-    output.put('stage|ICP Registration')
-    if (verbose):
-        print(result_icp)
-        draw_registration_result(source_down, target_down, result_icp.transformation)
-    
-    # Perform transformation on camera point cloud data
-    source_down.transform(result_icp.transformation)
+        # Paint both clouds uniform colors to easily differentiate
+        source_down.paint_uniform_color([1, 0.706, 0])
+        target_down.paint_uniform_color([0, 0.651, 0.929])
 
-    # Calculated ueclidian distance between point pairs for use in deviation analysis
-    distances = distance.cdist(np.asarray(source_down.points), np.asarray(target_down.points), 'euclidean')
-    distances = np.min(np.array(distances), axis=1)
+        # Perform global registration
+        result_ransac = execute_global_registration(source_down, target_down,
+                                                    source_fpfh, target_fpfh,
+                                                    voxel_size)
 
-    # Count number of points deviating beyond threshold
-    source_down.paint_uniform_color([1, 0.706, 0])
-    target_down.paint_uniform_color([0, 0.651, 0.929])
-    a = np.logical_and(distances > float(devThreshVal), distances < 50)
-    occurrences = np.count_nonzero(a == True)
+        # Output time taken for global transformation
+        done_queue.put('time|RANSAC time:{}'.format(time.time() - start))
+        start = time.time()
+            
+        # Display global registration results
+        if (verbose):
+            done_queue.put('stage|Global Registration')
+            draw_registration_result(source_down, target_down, result_ransac.transformation)
 
-    # Display number of points beyond deviation threshold and sound warning if required
-    if occurrences > float(devTolVal): # Allow for some false positives
-        output.put('result|Deviated Points: {}'.format(occurrences))
+        # Perform icp registration
+        result_icp = refine_registration(source_down, target_down, source_fpfh, target_fpfh,
+                                        voxel_size, result_ransac)
 
-    # Show highlighted deviation points
-    output.put('stage|Deviation Display')
-    color_array = np.asarray(source_down.colors)
-    color_array[a, :] = [1, 0, 0]
-    source_down.colors = o3d.utility.Vector3dVector(color_array)
-    if (verbose):
-        geometries = ([source_down, target_down])
-        visuals(geometries)
+        # Output time taken for ICP registration
+        done_queue.put('time|ICP time:{}'.format(time.time() - start))
+        start = time.time()
 
-    # Record time for registration process
-    time_finish = time.time() - start
-    print("Total time is %.3f sec.\n" % time_finish)
-    output.put('time|Time elapsed: %f' % time_finish)
-    output.put('finish|')
+        # Display icp registration results
+        if (verbose):
+            done_queue.put('stage|ICP Registration')
+            draw_registration_result(source_down, target_down, result_icp.transformation)
+        
+        # Perform transformation on camera point cloud data
+        source_down.transform(result_icp.transformation)
+
+        # Calculated ueclidian distance between point pairs for use in deviation analysis
+        distances = distance.cdist(np.asarray(source_down.points), np.asarray(target_down.points), 'euclidean')
+        distances = np.min(np.array(distances), axis=1)
+
+        # Count number of points deviating beyond threshold
+        source_down.paint_uniform_color([1, 0.706, 0])
+        target_down.paint_uniform_color([0, 0.651, 0.929])
+        a = np.logical_and(distances > float(devThreshVal), distances < 50)
+        occurrences = np.count_nonzero(a == True)
+
+        # Output time taken to calculate deviation results
+        done_queue.put('time|Deviation time:{}'.format(time.time() - start))
+        done_queue.put('time|Total time:{}'.format(time.time() - total))
+        start = time.time()
+
+        # Display number of points beyond deviation threshold and sound warning if required
+        if occurrences > float(devTolVal): # Allow for some false positives
+            done_queue.put('result|Deviated Points: |{}'.format(occurrences))
+
+        # Show highlighted deviation points
+        color_array = np.asarray(source_down.colors)
+        color_array[a, :] = [1, 0, 0]
+        source_down.colors = o3d.utility.Vector3dVector(color_array)
+        if (verbose):
+            done_queue.put('stage|Deviation Display')
+            geometries = ([source_down, target_down])
+            visuals(geometries)
+
+        # Notify parent that application is finished
+        done_queue.put('finish|')
+
+        # Restore originals in preparation for next loop
+        source = sourceOrig
+        target = targetOrig
+        source_down = sourceOrig_down
+        target_down = targetOrig_down
+        source_fpfh = sourceOrig_fpfh
+        target_fpfh = targetOrig_fpfh

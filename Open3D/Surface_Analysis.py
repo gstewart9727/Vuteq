@@ -161,7 +161,7 @@ class GUI(object):
         sv1.trace("w", lambda name, index, mode, sv1=sv1: self.resetRegister())
         sv2.trace("w", lambda name, index, mode, sv2=sv2: self.resetRegister())
         self.cropFile = tk.Entry(self.optionsFrame, textvariable=sv1)
-        self.cropFile.insert(0, '..\Training Mold\cropped_1.ply')
+        self.cropFile.insert(0, '..\Training Mold\cropped_exp.ply')
         self.cropFile.grid(row=17, column=2)
         self.CADfile = tk.Entry(self.optionsFrame, textvariable=sv2)
         self.CADfile.insert(0, '..\Training Mold\Main-Refined.ply')
@@ -231,8 +231,15 @@ class GUI(object):
     # Returns       : None
     # Description   : Start Open3D provided applciation for gathering ROI file
     def train(self):
+        self.task_queue.close()
+        self.done_queue.close()
+        if self.p.is_alive():
+            self.p.terminate() 
+
         p = Process(target=iv.crop_geometry, args=())   
         p.start()
+        p.join()
+        self.resetRegister()
 
     # Function      : responseHandler
     # Parameters    : 
@@ -299,13 +306,13 @@ class GUI(object):
     # Description   : This function handles the window close event and shuts down application resources
     def on_closing(self):
         print('CLOSING')
-        self.root.destroy()
 
         self.task_queue.close()
         self.done_queue.close()
         if self.p.is_alive():
             self.p.terminate()  
 
+        self.root.destroy()
 
 if __name__ == "__main__":
     gui = GUI()

@@ -1,2 +1,7 @@
 pip install open3d
 pip install scipy
+pip install keyboard
+pip install numpy
+pip install pillow
+pip install pyrealsense2
+pip install opencv-python==3.4.2.17

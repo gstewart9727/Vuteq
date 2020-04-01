@@ -20,9 +20,11 @@ import win32con
 import os
 import Surface_Analysis as sa
 import keyboard
+import pyrealsense2 as rs
+
 
 # Global variable determining level of output of application
-verbose = False
+verbose = True
 
 # Function      : draw_registration_Result
 # Parameters    : source/target - point cloud datasets
@@ -54,29 +56,7 @@ def visuals(clouds):
         vis.add_geometry(geometry)
 
     # Display visualizer window and destroy it when user closes it
-    vis.update_geometry(geometry)
-    vis.poll_events()
-    vis.update_renderer()
-    
-    # Enumaerate all open windows
-    results = []
-    top_windows = []
-    win32gui.EnumWindows(windowEnumerationHandler, top_windows)
-    for i in top_windows:
-        # Find Open3D visualizer window and bring it up front
-        if "Open3D" in i[1]:
-            print (i[1]) 
-            try:
-                win32gui.ShowWindow(i[0],5)
-                win32gui.SetForegroundWindow(i[0])
-            except:
-                print ('Window open')
-            break
-
-    # Wait for keypress to continue
-    keyboard.read_key()
-
-    # Destroy visualizer window when done
+    vis.run()
     vis.destroy_window()
 
 def windowEnumerationHandler(hwnd, top_windows):
@@ -113,30 +93,47 @@ def preprocess_point_cloud(pcd, voxel_size):
 # Returns       : Processed point clouds
 # Description   : This function uniformly reduces the number of points in a cloud to
 #                 increase the efficiency of further registration operations
-def prepare_dataset(voxel_size, targetFile, cropFile):
-    # print(":: Load two point clouds")
-    target = o3d.io.read_point_cloud(targetFile)
-    source = o3d.io.read_point_cloud("..\Training Mold\Training_mold.ply")
-    cropROI = o3d.io.read_point_cloud(cropFile)
-    source.scale(1000)
-    target.scale(1)
+def prepare_source(voxel_size, cropFile, pipeline, align):
+
+    # Start camera and pipeline
+    frames = pipeline.wait_for_frames()
+    frames = align.process(frames)
+    profile = frames.get_profile()
+    depth_frame = frames.get_depth_frame()
+    color_frame = frames.get_color_frame()
+    
+    # Convert images to numpy arrays
+    depth_image = np.asanyarray(depth_frame.get_data())
+    color_image = np.asanyarray(color_frame.get_data())
+    img_depth = o3d.geometry.Image(depth_image)
+    img_color = o3d.geometry.Image(color_image)
+    rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(img_color, img_depth)
+    
+    # Gather pointcloud from camera stream
+    intrinsics = profile.as_video_stream_profile().get_intrinsics()
+    pinhole_camera_intrinsic = o3d.camera.PinholeCameraIntrinsic(intrinsics.width, intrinsics.height, intrinsics.fx, intrinsics.fy, intrinsics.ppx, intrinsics.ppy)
+    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, pinhole_camera_intrinsic)
+
+    # Modify the cloud for visibility in visualizer
+    pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+    pcd.paint_uniform_color([1, 0.706, 0])
+    pcd.scale(1000)
 
     # Prepare bounding box for cropping
-    bbox = o3d.geometry.OrientedBoundingBox(o3d.geometry.OrientedBoundingBox.create_from_points(cropROI.points))
-    
+    cropROI = o3d.io.read_point_cloud(cropFile, format='ply')
+    bbox = cropROI.get_oriented_bounding_box()
+
     # If set to verbose mode, display unregistered point clouds
     if (verbose):
-        # print(np.asarray(o3d.geometry.OrientedBoundingBox.get_box_points(bbox)))
-        geometries = ([bbox, source])
+        geometries = ([bbox, pcd])
         visuals(geometries)
 
     # Perform cropping
-    source_crop = source.crop(bbox)
+    source_crop = pcd.crop(bbox)
 
     # Perform processing on point clouds before registration process continues
     source_down, source_fpfh = preprocess_point_cloud(source_crop, voxel_size)
-    target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
-    return source, target, source_down, target_down, source_fpfh, target_fpfh
+    return source_crop, source_down, source_fpfh
 
 
 # Function      : execute_global_registration
@@ -191,17 +188,19 @@ def run(task_queue, done_queue, targetFile, cropFile):
     print('STARTED')
     # Prepare datasets
     voxel_size = 4
-    source, target, source_down, target_down, source_fpfh, target_fpfh = \
-            prepare_dataset(voxel_size, targetFile, cropFile)
-    # Create copies for restoring 
-    sourceOrig = source
-    targetOrig = target
-    sourceOrig_down = source_down
-    targetOrig_down = target_down
-    sourceOrig_fpfh = source_fpfh
-    targetOrig_fpfh = target_fpfh
-    sourceOrig.colors = source.colors
-    targetOrig.colors = target.colors
+    target = o3d.io.read_point_cloud(targetFile)
+    target.scale(1)
+    target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
+
+    # Configure depth and color streams
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+
+    # Start streaming
+    pipeline.start(config)
+    align = rs.align(rs.stream.color)
 
     # Start loop to wait for task requests from parent
     while True:
@@ -225,6 +224,8 @@ def run(task_queue, done_queue, targetFile, cropFile):
         # Start timer
         start = time.time()
         total = start
+
+        source, source_down, source_fpfh = prepare_source(voxel_size, cropFile, pipeline, align)
 
         # Send information about pointclouds
         if (verbose):
@@ -298,12 +299,4 @@ def run(task_queue, done_queue, targetFile, cropFile):
             visuals(geometries)
 
         # Notify parent that application is finished
-        done_queue.put('finish|')
-
-        # Restore originals in preparation for next loop
-        source = sourceOrig
-        target = targetOrig
-        source_down = sourceOrig_down
-        target_down = targetOrig_down
-        source_fpfh = sourceOrig_fpfh
-        target_fpfh = targetOrig_fpfh
+        done_queue.put('stage|Idle')

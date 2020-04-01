@@ -23,7 +23,7 @@ import keyboard
 # Parameters    : None
 # Returns       : None
 # Description   : This function gathers a snapshot of live camera data and crops it according to user selection
-def crop_geometry():
+def crop_geometry(done_queue):
 
     # Display instructions in console
     print("Manual geometry cropping")
@@ -83,6 +83,7 @@ def crop_geometry():
 
         # If geometry has not yet been added to visualizer, do so
         if geom_added == False:
+            done_queue.put('stage|Live Data Stream')
             vis.add_geometry(pointcloud)
             geom_added = True
 
@@ -103,6 +104,7 @@ def crop_geometry():
     del vis
 
     # Preprocess point cloud and send it to Open3D function for cropping
+    done_queue.put('stage|ROI Cropping')
     vis = o3d.visualization.VisualizerWithEditing()
     vis.create_window(width=1395, height=670, left=10, top=100)    
     vis.add_geometry(pointcloud)

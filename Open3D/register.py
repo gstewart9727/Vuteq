@@ -21,10 +21,11 @@ import os
 import Surface_Analysis as sa
 import keyboard
 import pyrealsense2 as rs
+import sys
 
 
 # Global variable determining level of output of application
-verbose = True
+verbose = False
 
 # Function      : draw_registration_Result
 # Parameters    : source/target - point cloud datasets
@@ -186,21 +187,30 @@ def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, re
 def run(task_queue, done_queue, targetFile, cropFile):
 
     print('STARTED')
-    # Prepare datasets
-    voxel_size = 4
-    target = o3d.io.read_point_cloud(targetFile)
-    target.scale(1)
-    target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
+
+    # Prepare target pointcloud from stored ply file
+    try:
+        voxel_size = 4
+        target = o3d.io.read_point_cloud(targetFile)
+        target.scale(1)
+        target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
+    except RuntimeError as e:
+        done_queue.put('error|Target file not found. Check target filename.|1')
+        sys.exit([e])
 
     # Configure depth and color streams
-    pipeline = rs.pipeline()
-    config = rs.config()
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    try:
+        pipeline = rs.pipeline()
+        config = rs.config()
+        config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 
-    # Start streaming
-    pipeline.start(config)
-    align = rs.align(rs.stream.color)
+        # Start streaming
+        pipeline.start(config)
+        align = rs.align(rs.stream.color)
+    except RuntimeError as e:
+        done_queue.put('error|Device not connected. Check camera connection.|2')
+        sys.exit([e])
 
     # Start loop to wait for task requests from parent
     while True:
@@ -225,7 +235,12 @@ def run(task_queue, done_queue, targetFile, cropFile):
         start = time.time()
         total = start
 
-        source, source_down, source_fpfh = prepare_source(voxel_size, cropFile, pipeline, align)
+        # Prepare source data from camera
+        try:
+            source, source_down, source_fpfh = prepare_source(voxel_size, cropFile, pipeline, align)
+        except RuntimeError as e:
+            done_queue.put('error|Error preparing camera data. Validate crop file and camera connection.|3')
+            sys.exit([e])
 
         # Send information about pointclouds
         if (verbose):
@@ -246,7 +261,7 @@ def run(task_queue, done_queue, targetFile, cropFile):
                                                     voxel_size)
 
         # Output time taken for global transformation
-        done_queue.put('time|RANSAC time:{}'.format(time.time() - start))
+        done_queue.put('time|RANSAC time:\t\t{:.4f} seconds'.format(time.time() - start))
         start = time.time()
             
         # Display global registration results
@@ -259,7 +274,7 @@ def run(task_queue, done_queue, targetFile, cropFile):
                                         voxel_size, result_ransac)
 
         # Output time taken for ICP registration
-        done_queue.put('time|ICP time:{}'.format(time.time() - start))
+        done_queue.put('time|ICP time:\t\t{:.4f} seconds'.format(time.time() - start))
         start = time.time()
 
         # Display icp registration results
@@ -281,8 +296,8 @@ def run(task_queue, done_queue, targetFile, cropFile):
         occurrences = np.count_nonzero(a == True)
 
         # Output time taken to calculate deviation results
-        done_queue.put('time|Deviation time:{}'.format(time.time() - start))
-        done_queue.put('time|Total time:{}'.format(time.time() - total))
+        done_queue.put('time|Deviation time:\t{:.4f} seconds'.format(time.time() - start))
+        done_queue.put('time|Total time:\t\t{:.4f} seconds'.format(time.time() - total))
         start = time.time()
 
         # Display number of points beyond deviation threshold and sound warning if required

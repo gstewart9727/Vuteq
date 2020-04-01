@@ -77,6 +77,7 @@ class GUI(object):
         self.visualFrame.grid(row=0, column=0, sticky="nes", pady=5, padx=5)
         self.optionsFrame.grid(row=0, column=1, rowspan=2, sticky="nws", pady=5, padx=5)
         self.outputFrame.grid(row=1, sticky="ew", padx=5, pady=5)
+
         # Change weight and propogation settings to allow manual resizing of columns
         self.outputFrame.grid_propagate(False)
         self.outputFrame.grid_columnconfigure(0, weight=1)
@@ -85,7 +86,7 @@ class GUI(object):
         # Create Labels for Settings Section
         self.statusLabel = tk.Label(self.optionsFrame, text='Operation Info')
         self.statusLabel.grid(row=0, column=1, sticky="w")
-        self.stageLabel = tk.Label(self.optionsFrame, text='  Stage:')
+        self.stageLabel = tk.Label(self.optionsFrame, text='Stage:')
         self.stageLabel.grid(row=1, column=1, sticky="w")
         self.stageValue = tk.Label(self.optionsFrame, fg='Blue', text='Idle')
         self.stageValue.grid(row=1, column=2, sticky="w")
@@ -231,13 +232,26 @@ class GUI(object):
     # Returns       : None
     # Description   : Start Open3D provided applciation for gathering ROI file
     def train(self):
-        self.task_queue.close()
-        self.done_queue.close()
+
+        # Display cropping instructions
+        self.outputText.insert(tk.END, 'Manual geometry cropping' + "\n")
+        self.outputText.insert(tk.END, '1) Press "Q" to exit live camera feed and begin cropping' + "\n")
+        self.outputText.insert(tk.END, '2) Press "Y" twice to align geometry with negative direction of y-axis' + "\n")
+        self.outputText.insert(tk.END, '3) Press "K" to lock screen and to switch to selection mode' + "\n")
+        self.outputText.insert(tk.END, '4) Drag for rectangle selection, or use ctrl + left click for polygon selection' + "\n")
+        self.outputText.insert(tk.END, '5) Press "C" to get a selected geometry and to save it' + "\n")
+        self.outputText.insert(tk.END, '6) Press "F" to switch to freeview mode' + "\n")
+        self.outputText.update()
+
+        # Before we start a new process for gathering a ROI, we must first close the registration process
         if self.p.is_alive():
             self.p.terminate() 
 
-        p = Process(target=iv.crop_geometry, args=())   
+        # Start crop geometry function in its own process
+        p = Process(target=iv.crop_geometry, args=(self.done_queue,))   
         p.start()
+
+        # After cropping process has completed, restart the registration process
         p.join()
         self.resetRegister()
 
@@ -246,6 +260,7 @@ class GUI(object):
     # Returns       : None
     # Description   : This function processes responses from registration thread and updates GUI elements
     def responseHandler(self):
+        
         # Wait for message in queue
         if (self.done_queue.empty() == False):
             # Receive and display message received
@@ -254,26 +269,41 @@ class GUI(object):
 
             # Break message down my pipe delimiter
             fields = response.split('|')
-            if (fields[0] == 'stage'):
+            if (fields[0] == 'stage'):  # Message containing current stage
                 self.stageValue['text'] = fields[1]
-            elif (fields[0] == 'time'):
+                self.stageValue.update()
+            elif (fields[0] == 'time'): # Message containing time value
                 self.outputText.insert(tk.END, fields[1] + "\n")
-            elif (fields[0] == 'sourcePoints'):
+            elif (fields[0] == 'sourcePoints'): # Message containing number of points in source pointcloud
                 self.sourcePoints['text'] = fields[1]
-            elif (fields[0] == 'targetPoints'):
+            elif (fields[0] == 'targetPoints'): # Message containing number of points in target pointcloud
                 self.targetPoints['text'] = fields[1]
-            elif (fields[0] == 'sourcePointsDS'):
+            elif (fields[0] == 'sourcePointsDS'):   # Message containing number of points in downsampled source pointcloud
                 self.sourceDownPoints['text'] = fields[1]
-            elif (fields[0] == 'targetPointsDS'):
+            elif (fields[0] == 'targetPointsDS'):   # Message containing number of points in downsampled target pointcloud
                 self.targetDownPoints['text'] = fields[1]
-            elif (fields[0] == 'result'):
-                # If message contains results of registration, display results and warning if required
+            elif (fields[0] == 'error'):   # Message containing error information
+                # Display error information
+                ctypes.windll.user32.MessageBoxW(0, fields[1], "ERROR", 0x1000)
+                
+                # If error message is regarding a filename, open file selection box
+                if fields[2] == '1':
+                    self.selectFile(self.CADfile)
+                
+                # Reset registration process
+                self.resetRegister()
+                self.stageValue['text'] = 'Idle'
+            elif (fields[0] == 'result'):   # Message containing results of registration
+                # Display time taken for process
+                self.time_finish = time.time() - self.start
+                self.outputText.insert(tk.END, 'Elapsed Time:\t\t{:.4f}'.format(self.time_finish) + ' seconds\n')
+
+                # Display and highlight number of deviated points
                 colortag = "color-" + "Red"
                 self.outputText.tag_configure(colortag, foreground="Red")
                 self.outputText.insert(tk.END, 'Deviated Points: ' + fields[2] + "\n", colortag)
-                self.stageValue['text'] = 'Idle'  
-                self.time_finish = time.time() - self.start
-                self.outputText.insert(tk.END, 'Elapsed Time: ' + str(self.time_finish) + '\n')
+
+                # If number of deviated points exceeds threshold, display warning
                 if int(fields[2]) > int(self.devTol.get()):
                     ctypes.windll.user32.MessageBoxW(0, "Check mold surface! Obstruction Detected.", "WARNING", 0x1000)
 

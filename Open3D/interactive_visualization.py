@@ -25,15 +25,6 @@ import keyboard
 # Description   : This function gathers a snapshot of live camera data and crops it according to user selection
 def crop_geometry(done_queue):
 
-    # Display instructions in console
-    print("Manual geometry cropping")
-    print("1) Press 'Y' twice to align geometry with negative direction of y-axis")
-    print("2) Press 'K' to lock screen and to switch to selection mode")
-    print("3) Drag for rectangle selection,")
-    print("   or use ctrl + left click for polygon selection")
-    print("4) Press 'C' to get a selected geometry and to save it")
-    print("5) Press 'F' to switch to freeview mode")
-
     # Configure depth and color streams
     pipeline = rs.pipeline()
     config = rs.config()

@@ -26,7 +26,7 @@ from PIL import ImageTk, Image
 class GUI(object):
 
     # Function      : __init__
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : Initializer function. Calls functions to generate required GUI elements
     def __init__(self):
@@ -54,7 +54,7 @@ class GUI(object):
         
 
     # Function      : create_window
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function creates visual aspects of the GUI application
     def create_window(self):
@@ -151,7 +151,7 @@ class GUI(object):
         self.root.resizable(0, 0) 
 
     # Function      : create_widgets
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function creates interactive aspects of the GUI application
     def create_widgets(self):
@@ -193,7 +193,7 @@ class GUI(object):
         self.outputText.grid(row=0, columnspan=2, sticky="nsew")
 
     # Function      : setQuickMode
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function updates GUI elements pertaining to the stage and then passes
     #                 the task specifications on the message queue to the registration process
@@ -205,7 +205,7 @@ class GUI(object):
         self.task_queue.put(task)
 
     # Function      : setVerboseMode
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function updates GUI elements pertaining to the stage and then passes
     #                 the task specifications on the message queue to the registration process
@@ -228,12 +228,13 @@ class GUI(object):
         entryBox.insert(0, self.path)
 
     # Function      : train
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : Start Open3D provided applciation for gathering ROI file
     def train(self):
 
         # Display cropping instructions
+        self.outputText.delete('1.0', tk.END)
         self.outputText.insert(tk.END, 'Manual geometry cropping' + "\n")
         self.outputText.insert(tk.END, '1) Press "Q" to exit live camera feed and begin cropping' + "\n")
         self.outputText.insert(tk.END, '2) Press "Y" twice to align geometry with negative direction of y-axis' + "\n")
@@ -256,7 +257,7 @@ class GUI(object):
         self.resetRegister()
 
     # Function      : responseHandler
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function processes responses from registration thread and updates GUI elements
     def responseHandler(self):
@@ -311,7 +312,7 @@ class GUI(object):
         self.root.after(10, self.responseHandler)   
 
     # Function      : resetRegister
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function attempts to close the queues and threads before restarting them
     #                 with updated parameters
@@ -331,12 +332,10 @@ class GUI(object):
             self.done_queue = None
 
     # Function      : on_closing
-    # Parameters    : 
+    # Parameters    : Reference to class
     # Returns       : None
     # Description   : This function handles the window close event and shuts down application resources
     def on_closing(self):
-        print('CLOSING')
-
         self.task_queue.close()
         self.done_queue.close()
         if self.p.is_alive():

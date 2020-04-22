@@ -56,7 +56,7 @@ def visuals(clouds):
     for geometry in clouds:
         vis.add_geometry(geometry)
 
-    # Display visualizer window and destroy it when user closes it
+    # Display visualizer window and destroy it when user closes it (eventually will add means of bringing visualizer window to the front)
     vis.run()
     vis.destroy_window()
 
@@ -67,7 +67,7 @@ def windowEnumerationHandler(hwnd, top_windows):
 # Function      : preprocess_point_cloud
 # Parameters    : pcd - Point cloud to be processed
 #                 voxel-size - unit size for downsampling ratio
-# Returns       : None
+# Returns       : Downsampled pointcloud
 # Description   : This function uniformly reduces the number of points in a cloud to
 #                 increase the effeciency of further registration operations
 def preprocess_point_cloud(pcd, voxel_size):
@@ -120,7 +120,7 @@ def prepare_source(voxel_size, cropFile, pipeline, align):
     pcd.paint_uniform_color([1, 0.706, 0])
     pcd.scale(1000)
 
-    # Prepare bounding box for cropping
+    # Prepare bounding box for cropping (should be moved to intial stages of process, does not need to read file every iteration)
     cropROI = o3d.io.read_point_cloud(cropFile, format='ply')
     bbox = cropROI.get_oriented_bounding_box()
 
@@ -178,19 +178,18 @@ def refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, re
 
 
 # Function      : run
-# Parameters    : devThreshVal - The deviation threshold value. Used to set distance for two points to be considered deviated.
-#                 devTolVal - The deviation tolerance value. Used to determine how many deviated points are permitted
-#                   before the alarm is sounded
-#                 verbosity - A boolean value used to determine the level of output from the registration process.
+# Parameters    : task_queue - Message Queue for instructions from parent thread
+#                 done_queue - Message queue for sending results and responses to parent
+#                 targetFile/cropFile - Strings containing filepaths for the crop ROI and target CAD file
 # Returns       : None
 # Description   : This function calls the functions and performs calculations required for the full registration process.
 def run(task_queue, done_queue, targetFile, cropFile):
 
-    print('STARTED')
+    # Voxel sized used for downsampling process (will be specified by parent thread later)
+    voxel_size = 4
 
     # Prepare target pointcloud from stored ply file
     try:
-        voxel_size = 4
         target = o3d.io.read_point_cloud(targetFile)
         target.scale(1)
         target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
@@ -244,10 +243,8 @@ def run(task_queue, done_queue, targetFile, cropFile):
 
         # Send information about pointclouds
         if (verbose):
-            # print ('Source Data Points \n')
             done_queue.put('sourcePoints|Points: {}'.format(len(source.points)))
             done_queue.put('sourcePointsDS|DS Points: {}'.format(len(source_down.points)))
-            # print ('Target Data Points \n')
             done_queue.put('targetPoints|Points: {}'.format(len(target.points)))
             done_queue.put('targetPointsDS|DS Points: {}'.format(len(target_down.points)))
 

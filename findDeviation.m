@@ -23,8 +23,12 @@ function ptCloudTransformed_FINAL = findDeviation(ptCloudTransformed_FINAL,ptClo
                                     
                                     % Double to integer conversion 
                                     numOfPointsInMatrix = uint8(numOfPointsInMatrix);
+                                    
+                                    % adding the point matix to the generate color property of point cloud object
                                     ptCloudTransformed_FINAL.Color = numOfPointsInMatrix;
-
+                                    
+                                    % incase there is need to see what are the deviated points, Initialzing the empty matrix to store points
+                                    % that are deviated.
                                     myDeviatedPoints = [];
                                     
                                     % This loop iterates though every point from the minimum distance matrix
@@ -35,9 +39,11 @@ function ptCloudTransformed_FINAL = findDeviation(ptCloudTransformed_FINAL,ptClo
                                             
                                             % Points above the threhold are converted into red in color to easy visualization
                                             ptCloudTransformed_FINAL.Color(n,:) = [255,0,0];
-                                             myDeviatedPoints = cat(1,myDeviatedPoints,ptCloudTransformed_FINAL.Location(n,:));
+                                            
+                                            % Adding all the deiated points in the matrix created earlier
+                                            myDeviatedPoints = cat(1,myDeviatedPoints,ptCloudTransformed_FINAL.Location(n,:));
                                              if myDeviatedPoints > 100
-
+                                              % This section can be used to introduce alert mechanism in the future 
                                              end
 
                                         else
